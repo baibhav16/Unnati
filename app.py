@@ -1,66 +1,65 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
+import pickle
+import os
 
-# Load model, scaler, and encoder
-model = joblib.load("model/app_id_classifier.pkl")
-scaler = joblib.load("model/scaler.pkl")
-label_encoder = joblib.load("model/label_encoder.pkl")
+# Load model, scaler, and label encoder using pickle
+with open("model/app_id_classifier.pkl", "rb") as f:
+    model = pickle.load(f)
 
-# Get feature names used during training
-try:
-    trained_features = model.feature_names_in_
-except AttributeError:
-    trained_features = joblib.load("model/feature_names.pkl")
+with open("model/scaler.pkl", "rb") as f:
+    scaler = pickle.load(f)
 
-# Streamlit app
-st.set_page_config(page_title="Traffic Classifier", layout="wide")
-st.title("🔍 AI-Powered Network Traffic Classifier")
+with open("model/label_encoder.pkl", "rb") as f:
+    label_encoder = pickle.load(f)
 
-uploaded_file = st.file_uploader("📁 Upload a CSV File", type=["csv"])
+# Get feature names from training model
+expected_features = scaler.feature_names_in_
+
+st.set_page_config(page_title="Network Traffic Classifier", layout="wide")
+st.title("🚦 Network Traffic Classification & Anomaly Detection")
+
+st.write("Upload a CSV file with extracted features to predict application ID and detect anomalies.")
+
+uploaded_file = st.file_uploader("📤 Upload CSV", type=["csv"])
 
 if uploaded_file is not None:
     try:
+        # Read uploaded file
         df = pd.read_csv(uploaded_file)
 
-        # Clean column names
+        # Clean columns
         df.columns = df.columns.str.strip()
 
-        # Drop empty columns and handle NaNs/Infs
+        # Handle missing/extra features
+        for feature in expected_features:
+            if feature not in df.columns:
+                df[feature] = 0
+
+        df = df[expected_features]
+
+        # Replace inf/-inf and drop rows with NaNs
         df.replace([np.inf, -np.inf], np.nan, inplace=True)
-        df.dropna(axis=1, thresh=len(df) * 0.9, inplace=True)
         df.dropna(inplace=True)
 
-        # Select only numeric columns
-        X = df.select_dtypes(include=[np.number])
-
-        # Align with training features
-        missing_cols = set(trained_features) - set(X.columns)
-        for col in missing_cols:
-            X[col] = 0
-        X = X[trained_features]  # Ensure column order
-
         # Scale
-        X_scaled = scaler.transform(X)
+        X_scaled = scaler.transform(df)
 
         # Predict
-        y_pred = model.predict(X_scaled)
-        labels = label_encoder.inverse_transform(y_pred)
+        predictions = model.predict(X_scaled)
+        prediction_labels = label_encoder.inverse_transform(predictions)
 
-        df["Prediction"] = labels
-        st.success("✅ Prediction completed!")
+        # Show results
+        df['Prediction'] = prediction_labels
+        st.success("✅ Prediction complete!")
         st.dataframe(df)
 
-        # Download button
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Download Results as CSV",
-            data=csv,
-            file_name="classified_traffic.csv",
-            mime="text/csv"
-        )
+        # Download results
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Predictions", csv, "predictions.csv", "text/csv")
 
     except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
+        st.error(f"❌ Error: {e}")
+else:
+    st.info("Please upload a file to start prediction.")
